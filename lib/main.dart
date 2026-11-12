@@ -1,76 +1,48 @@
+
 import 'package:flutter/material.dart';
-import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
-void main() => runApp(const MyApp());
+import 'firebase_options.dart';
+import 'screens/login_screen.dart';
+import 'services/notification_service.dart';
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+Future<void> main() async {
+  // Ensure Flutter is initialized.
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Connect the application to Firebase.
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  // Request permission to display phone notifications.
+  await FirebaseMessaging.instance.requestPermission(
+    alert: true,
+    badge: true,
+    sound: true,
+);
+await NotificationService.instance.initialize();
+
+  // Start the application.
+  runApp(const FindMyTutorApp());
+}
+
+class FindMyTutorApp extends StatelessWidget {
+  const FindMyTutorApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Find My Tutor',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue)),
-      home: const SplashScreen(),
-    );
-  }
-}
-
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
-  @override
-  State<SplashScreen> createState() => _SplashScreenState();
-}
-
-class _SplashScreenState extends State<SplashScreen> {
-  String _status = 'Initializing...';
-
-  @override
-  void initState() {
-    super.initState();
-    _testDatabase();
-  }
-
-  Future<void> _testDatabase() async {
-    try {
-      final dbPath = await getDatabasesPath();
-      final path = join(dbPath, 'test.db');
-      final db = await openDatabase(
-        path,
-        version: 1,
-        onCreate: (db, version) async {
-          await db.execute(
-              'CREATE TABLE test(id INTEGER PRIMARY KEY, name TEXT)');
-        },
-      );
-      await db.insert('test', {'name': 'SQLite works!'});
-      final result = await db.query('test');
-      setState(() => _status = 'DB OK: ${result.first['name']}');
-    } catch (e) {
-      setState(() => _status = 'DB Error: $e');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.school, size: 100, color: Colors.blue),
-            const SizedBox(height: 20),
-            const Text('Find My Tutor',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Text(_status, textAlign: TextAlign.center),
-            ),
-          ],
+      title: 'Find My Tutor',
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF008080),
         ),
+        scaffoldBackgroundColor: Colors.white,
       ),
+      home: const LoginScreen(),
     );
   }
 }

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "373171434363",
+    "project_id": "find-my-tutor-b8367",
+    "storage_bucket": "find-my-tutor-b8367.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:373171434363:android:b95ebb701667c6e03203de",
+        "android_client_info": {
+          "package_name": "com.example.find_my_tutor"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBIfaOIv0KZ2opr1yurqClDMc805eywas0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

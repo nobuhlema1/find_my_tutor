@@ -1,0 +1,879 @@
+import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+class TutorDashboard extends StatefulWidget {
+  const TutorDashboard({super.key});
+
+  @override
+  State<TutorDashboard> createState() => _TutorDashboardState();
+}
+
+class _TutorDashboardState extends State<TutorDashboard> {
+  static const teal = Color(0xFF008080);
+  static const lightTeal = Color(0xFFE0F2F1);
+
+  final qualificationController = TextEditingController();
+  final subjectController = TextEditingController();
+  bool isAddingSubject = false;
+
+  String currentPage = 'Dashboard';
+  String tutorName = 'Tutor';
+  bool isLoading = true;
+  bool isSaving = false;
+
+  List<String> subjects = [];
+  List<String> grades = [];
+  Set<String> selectedSubjects = {};
+  Set<String> selectedGrades = {};
+
+  @override
+  void initState() {
+    super.initState();
+    loadTutorData();
+  }
+
+  @override
+  void dispose() {
+    qualificationController.dispose();
+    subjectController.dispose();
+    super.dispose();
+  }
+
+  void showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> loadTutorData() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      if (mounted) {
+        setState(() => isLoading = false);
+      }
+      return;
+    }
+
+    try {
+      final db = FirebaseFirestore.instance;
+
+      final results = await Future.wait([
+        db.collection('users').doc(user.uid).get(),
+        db.collection('subjects').get(),
+        db.collection('grade_levels').orderBy('order').get(),
+      ]);
+
+      final profile = results[0] as DocumentSnapshot<Map<String, dynamic>>;
+      final subjectDocs = results[1] as QuerySnapshot<Map<String, dynamic>>;
+      final gradeDocs = results[2] as QuerySnapshot<Map<String, dynamic>>;
+
+      final data = profile.data();
+
+      if (data == null || data['role'] != 'Tutor') {
+        throw Exception('Tutor profile not found');
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        tutorName = data['fullName']?.toString() ?? 'Tutor';
+
+        qualificationController.text =
+            data['qualification']?.toString() ?? '';
+
+        subjects = subjectDocs.docs
+            .map((doc) => doc.data()['name']?.toString() ?? '')
+            .where((name) => name.isNotEmpty)
+            .toList()
+          ..sort();
+
+        grades = gradeDocs.docs
+            .map((doc) => doc.data()['name']?.toString() ?? '')
+            .where((name) => name.isNotEmpty)
+            .toList();
+
+        selectedSubjects =
+            Set<String>.from(data['subjectsOffered'] ?? []);
+
+        selectedGrades =
+            Set<String>.from(data['gradesOffered'] ?? []);
+
+        isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => isLoading = false);
+      showMessage('Unable to load tutor profile or options');
+    }
+  }
+
+  Future<void> saveProfile() async {
+    if (isSaving) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    final qualification = qualificationController.text.trim();
+
+    if (user == null) {
+      showMessage('Please log in first');
+      return;
+    }
+
+    if (qualification.isEmpty ||
+        selectedSubjects.isEmpty ||
+        selectedGrades.isEmpty) {
+      showMessage(
+        'Enter a qualification and select subjects and grades',
+      );
+      return;
+    }
+
+    setState(() => isSaving = true);
+
+    try {
+      final db = FirebaseFirestore.instance;
+
+      final subjectsList = selectedSubjects.toList()..sort();
+      final gradesList = selectedGrades.toList()..sort();
+
+      final batch = db.batch();
+
+      final userReference = db.collection('users').doc(user.uid);
+
+      final publicProfileReference =
+          db.collection('tutor_profiles').doc(user.uid);
+
+      // Update the tutor's private profile.
+      batch.update(userReference, {
+        'qualification': qualification,
+        'subjectsOffered': subjectsList,
+        'gradesOffered': gradesList,
+        'profileUpdatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Save the information students are allowed to see.
+      batch.set(publicProfileReference, {
+        'tutorId': user.uid,
+        'fullName': tutorName,
+        'qualification': qualification,
+        'subjectsOffered': subjectsList,
+        'gradesOffered': gradesList,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      await batch.commit();
+
+      if (!mounted) return;
+      showMessage('Tutor profile saved successfully!');
+    } on FirebaseException catch (e) {
+      if (!mounted) return;
+      showMessage(
+        e.code == 'permission-denied'
+            ? 'Profile update blocked by Firestore rules'
+            : 'Could not save tutor profile',
+      );
+    } finally {
+      if (mounted) {
+        setState(() => isSaving = false);
+      }
+    }
+  }
+
+  void navigateTo(String page) {
+    Navigator.pop(context);
+    setState(() => currentPage = page);
+  }
+
+  Widget drawerItem(String title, IconData icon) {
+    return ListTile(
+      leading: Icon(icon, color: teal),
+      title: Text(title),
+      selected: currentPage == title,
+      selectedTileColor: lightTeal,
+      onTap: () => navigateTo(title),
+    );
+  }
+
+  Widget buildDrawer() {
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              color: teal,
+              padding: const EdgeInsets.all(24),
+              child: const Column(
+                children: [
+                  Icon(
+                    Icons.school_rounded,
+                    color: Colors.white,
+                    size: 55,
+                  ),
+                  SizedBox(height: 10),
+                  Text(
+                    'Find My Tutor',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    'Tutor Portal',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                children: [
+                  drawerItem(
+                    'Dashboard',
+                    Icons.dashboard_outlined,
+                  ),
+                  drawerItem('My Profile', Icons.person_outline),
+                  drawerItem('Subjects', Icons.menu_book_outlined),
+                  drawerItem(
+                    'Grade Levels',
+                    Icons.format_list_numbered,
+                  ),
+                  drawerItem('My Students', Icons.people_outline),
+                  drawerItem(
+                    'Bookings',
+                    Icons.calendar_month_outlined,
+                  ),
+                  drawerItem('My Reviews', Icons.star_outline),
+                  const Divider(),
+                  ListTile(
+                    leading: const Icon(Icons.logout, color: teal),
+                    title: const Text('Log Out'),
+                    onTap: () async {
+                      await FirebaseAuth.instance.signOut();
+                      if (!mounted) return;
+                      Navigator.of(context).popUntil(
+                        (route) => route.isFirst,
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget dashboardCard(
+    String title,
+    String subtitle,
+    IconData icon,
+  ) {
+    return Card(
+      color: Colors.white,
+      margin: const EdgeInsets.only(bottom: 14),
+      child: ListTile(
+        contentPadding: const EdgeInsets.all(16),
+        leading: Icon(icon, size: 32, color: teal),
+        title: Text(
+          title,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text(subtitle),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => setState(() => currentPage = title),
+      ),
+    );
+  }
+
+  Widget buildHome() {
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Text(
+          'Hello, $tutorName! 👋',
+          style: const TextStyle(
+            color: teal,
+            fontSize: 25,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text('Welcome to your Tutor Dashboard.'),
+        const SizedBox(height: 24),
+        dashboardCard(
+          'My Profile',
+          'Add qualifications, subjects and grades',
+          Icons.person_outline,
+        ),
+        dashboardCard(
+          'Subjects',
+          'View available tutoring subjects',
+          Icons.menu_book_outlined,
+        ),
+        dashboardCard(
+          'Grade Levels',
+          'View available high-school grades',
+          Icons.format_list_numbered,
+        ),
+        dashboardCard(
+          'My Students',
+          'Manage applications and enrolled students',
+          Icons.people_outline,
+        ),
+        dashboardCard(
+          'Bookings',
+          'View and schedule tutoring sessions',
+          Icons.calendar_month_outlined,
+        ),
+        dashboardCard(
+          'My Reviews',
+          'See student ratings and feedback',
+          Icons.star_outline,
+        ),
+      ],
+    );
+  }
+
+  Widget buildProfile() {
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        const Text(
+          'My Tutor Profile',
+          style: TextStyle(
+            color: teal,
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Complete your details to help students find you.',
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          'Qualifications',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: qualificationController,
+          maxLines: 3,
+          decoration: InputDecoration(
+            hintText: 'Enter your qualifications',
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        const SizedBox(height: 25),
+        const Text(
+          'Subjects Offered',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: teal,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...subjects.map(
+          (subject) => CheckboxListTile(
+            title: Text(subject),
+            value: selectedSubjects.contains(subject),
+            activeColor: teal,
+            controlAffinity: ListTileControlAffinity.leading,
+            onChanged: (checked) {
+              setState(() {
+                if (checked == true) {
+                  selectedSubjects.add(subject);
+                } else {
+                  selectedSubjects.remove(subject);
+                }
+              });
+            },
+          ),
+        ),
+        const SizedBox(height: 25),
+        const Text(
+          'Grade Levels Offered',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: teal,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...grades.map(
+          (grade) => CheckboxListTile(
+            title: Text(grade),
+            value: selectedGrades.contains(grade),
+            activeColor: teal,
+            controlAffinity: ListTileControlAffinity.leading,
+            onChanged: (checked) {
+              setState(() {
+                if (checked == true) {
+                  selectedGrades.add(grade);
+                } else {
+                  selectedGrades.remove(grade);
+                }
+              });
+            },
+          ),
+        ),
+        const SizedBox(height: 25),
+        SizedBox(
+          height: 52,
+          child: ElevatedButton(
+            onPressed: isSaving ? null : saveProfile,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: teal,
+              foregroundColor: Colors.white,
+            ),
+            child: Text(
+              isSaving ? 'Saving...' : 'Save Profile',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> addSubject() async {
+    if (isAddingSubject) return;
+
+    final name = subjectController.text.trim().replaceAll(
+      RegExp(r'\s+'),
+      ' ',
+    );
+
+    if (name.isEmpty) {
+      showMessage('Please enter a subject name');
+      return;
+    }
+
+    if (name.length < 3 || name.length > 60) {
+      showMessage('Subject name must be 3 to 60 characters');
+      return;
+    }
+
+    if (subjects.any(
+      (subject) => subject.toLowerCase() == name.toLowerCase(),
+    )) {
+      showMessage('This subject already exists');
+      return;
+    }
+
+    final id = name
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+
+    if (id.isEmpty) {
+      showMessage('Please use a valid subject name');
+      return;
+    }
+
+    setState(() => isAddingSubject = true);
+
+    try {
+      final reference =
+          FirebaseFirestore.instance.collection('subjects').doc(id);
+
+      await reference.set({'name': name});
+
+      if (!mounted) return;
+
+      setState(() {
+        if (!subjects.contains(name)) {
+          subjects.add(name);
+          subjects.sort();
+        }
+      });
+
+      subjectController.clear();
+      showMessage('Subject added successfully!');
+    } on FirebaseException catch (e) {
+      if (!mounted) return;
+
+      showMessage(
+        e.code == 'permission-denied'
+            ? 'You do not have permission to add subjects'
+            : 'Unable to add subject',
+      );
+    } finally {
+      if (mounted) {
+        setState(() => isAddingSubject = false);
+      }
+    }
+  }
+
+  Widget buildSubjectsPage() {
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        const Text(
+          'Subjects',
+          style: TextStyle(
+            color: teal,
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'View available subjects or add a missing high-school subject.',
+        ),
+        const SizedBox(height: 20),
+        TextField(
+          controller: subjectController,
+          decoration: InputDecoration(
+            labelText: 'Subject Name',
+            hintText: 'e.g. Agricultural Sciences',
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        ElevatedButton.icon(
+          onPressed: isAddingSubject ? null : addSubject,
+          icon: const Icon(Icons.add),
+          label: Text(
+            isAddingSubject ? 'Adding...' : 'Add Subject',
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: teal,
+            foregroundColor: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          'Available Subjects',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: teal,
+          ),
+        ),
+        const SizedBox(height: 12),
+        ...subjects.map(
+          (subject) => Card(
+            color: Colors.white,
+            child: ListTile(
+              leading: const Icon(
+                Icons.menu_book,
+                color: teal,
+              ),
+              title: Text(subject),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> updateApplication(
+    String applicationId,
+    String newStatus,
+  ) async {
+    if (!['accepted', 'declined', 'cancelled'].contains(newStatus)) {
+      return;
+    }
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('applications')
+          .doc(applicationId)
+          .update({
+        'status': newStatus,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (!mounted) return;
+
+      showMessage(
+        newStatus == 'accepted'
+            ? 'Student application accepted'
+            : newStatus == 'declined'
+                ? 'Student application declined'
+                : 'Student enrollment cancelled',
+      );
+    } on FirebaseException catch (e) {
+      if (!mounted) return;
+
+      showMessage(
+        e.code == 'permission-denied'
+            ? 'You do not have permission to update this application'
+            : 'Unable to update application',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      showMessage('Something went wrong');
+    }
+  }
+
+  Widget buildMyStudents() {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      return const Center(
+        child: Text('Please log in first'),
+      );
+    }
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('applications')
+          .where('tutorId', isEqualTo: user.uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const Center(
+            child: Text('Unable to load student applications'),
+          );
+        }
+
+        if (!snapshot.hasData) {
+          return const Center(
+            child: CircularProgressIndicator(color: teal),
+          );
+        }
+
+        final applications = snapshot.data!.docs;
+
+        final pending = applications.where((doc) {
+          return doc.data()['status'] == 'pending';
+        }).toList();
+
+        final enrolled = applications.where((doc) {
+          return doc.data()['status'] == 'accepted';
+        }).toList();
+
+        return ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            const Text(
+              'My Students',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: teal,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Manage student applications and enrollments.',
+            ),
+            const SizedBox(height: 25),
+
+            const Text(
+              'Student Applications',
+              style: TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.bold,
+                color: teal,
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            if (pending.isEmpty)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(18),
+                  child: Text('No pending applications'),
+                ),
+              ),
+
+            ...pending.map((doc) {
+              final data = doc.data();
+              final name =
+                  data['studentName']?.toString() ?? 'Student';
+
+              return Card(
+                color: Colors.white,
+                margin: const EdgeInsets.only(bottom: 12),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.person_outline,
+                        color: teal,
+                        size: 32,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Text('Status: Pending'),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          ElevatedButton(
+                            onPressed: () => updateApplication(
+                              doc.id,
+                              'accepted',
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: teal,
+                              foregroundColor: Colors.white,
+                            ),
+                            child: const Text('Accept'),
+                          ),
+                          OutlinedButton(
+                            onPressed: () => updateApplication(
+                              doc.id,
+                              'declined',
+                            ),
+                            child: const Text('Decline'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+
+            const SizedBox(height: 30),
+
+            const Text(
+              'Enrolled Students',
+              style: TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.bold,
+                color: teal,
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            if (enrolled.isEmpty)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(18),
+                  child: Text('No enrolled students yet'),
+                ),
+              ),
+
+            ...enrolled.map((doc) {
+              final data = doc.data();
+              final name =
+                  data['studentName']?.toString() ?? 'Student';
+
+              return Card(
+                color: Colors.white,
+                margin: const EdgeInsets.only(bottom: 12),
+                child: ListTile(
+                  leading: const Icon(
+                    Icons.school,
+                    color: teal,
+                  ),
+                  title: Text(name),
+                  subtitle: const Text('Enrolled'),
+                  trailing: TextButton(
+                    onPressed: () => updateApplication(
+                      doc.id,
+                      'cancelled',
+                    ),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+              );
+            }),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget buildOptionsPage(String title, List<String> options) {
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: teal,
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 16),
+        ...options.map(
+          (option) => Card(
+            color: Colors.white,
+            child: ListTile(
+              leading: const Icon(
+                Icons.check_circle_outline,
+                color: teal,
+              ),
+              title: Text(option),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget content;
+
+    if (isLoading) {
+      content = const Center(
+        child: CircularProgressIndicator(color: teal),
+      );
+    } else {
+      switch (currentPage) {
+        case 'Dashboard':
+          content = buildHome();
+          break;
+        case 'My Profile':
+          content = buildProfile();
+          break;
+        case 'Subjects':
+          content = buildSubjectsPage();
+          break;
+        case 'Grade Levels':
+          content = buildOptionsPage('Grade Levels', grades);
+          break;
+        case 'My Students':
+          content = buildMyStudents();
+          break;
+        default:
+          content = Center(
+            child: Text(
+              '$currentPage will be implemented next',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 18),
+            ),
+          );
+      }
+    }
+
+    return Scaffold(
+      backgroundColor: lightTeal,
+      appBar: AppBar(
+        title: Text(currentPage),
+        backgroundColor: teal,
+        foregroundColor: Colors.white,
+      ),
+      drawer: buildDrawer(),
+      body: content,
+    );
+  }
+}
